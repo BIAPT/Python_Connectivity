@@ -13,3 +13,5 @@ An example for every measure can be found here:
 Example_analysis.py
  (maybe a notebook might be better here)
 
+You can use the same example data as provided here :
+https://github.com/BIAPT/EEG_Preprocessing/tree/main/BIDS_testdata
