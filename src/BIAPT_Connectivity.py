@@ -4,7 +4,21 @@ from scipy.stats import pearsonr, wilcoxon
 
 
 class ConnectivityMeasure:
-
+    '''
+        Parent class for both pli and aec connectivity measures used
+        Attributes
+        ----------
+        window_size: float
+            length of each window in seconds
+        step_size : int
+            The increment in which windows are shifted.
+        fmin: float
+            Lower Frequency of Interest (Hz)    
+        fmax: float
+            Upper Frequency of Interest (Hz)   
+        verbose: Boolean
+            Verbose mode for logging information during runtime
+    '''
     def __init__(self, window_size, step_size, fmin, fmax, verbose=False):
         self.window_size = window_size
         self.step_size = step_size
@@ -31,7 +45,22 @@ class ConnectivityMeasure:
 
 
 class AEC(ConnectivityMeasure):
+    '''
+    WPLI Implementation
 
+    Attributes
+    ----------
+    window_size: float
+        length of each window in seconds
+    step_size : int
+        The increment in which windows are shifted.
+    fmin: float
+        Lower Frequency of Interest (Hz)    
+    fmax: float
+        Upper Frequency of Interest (Hz)   
+    verbose: Boolean
+        Verbose mode for logging information during runtime
+    '''
     def __init__(self, window_size, step_size, fmin, fmax, verbose=False):
         super().__init__(window_size, step_size, fmin, fmax, verbose=verbose)
 
@@ -105,7 +134,24 @@ class AEC(ConnectivityMeasure):
 
 
 class BasePLI(ConnectivityMeasure):
+    '''
+        Parent class for both wpli and dpli connectivity measures used
 
+        Attributes
+        ----------
+        window_size: float
+            length of each window in seconds
+        step_size : int
+            The increment in which windows are shifted.
+        fmin: float
+            Lower Frequency of Interest (Hz)    
+        fmax: float
+            Upper Frequency of Interest (Hz)   
+        n_surrogates: int
+            Number of surrogates used in the case of surrogate analysis
+        verbose: Boolean
+            Verbose mode for logging information during runtime
+    '''
     def __init__(self, window_size, step_size, fmin, fmax, n_surrogates=20, verbose=False):
         super().__init__(window_size, step_size, fmin, fmax, verbose=verbose)
         self.n_surrogates = n_surrogates
@@ -165,6 +211,26 @@ class BasePLI(ConnectivityMeasure):
 
 
 class WPLI(BasePLI):
+    '''
+        WPLI Implementation
+
+        Attributes
+        ----------
+        window_size: float
+            length of each window in seconds
+        step_size : int
+            The increment in which windows are shifted.
+        fmin: float
+            Lower Frequency of Interest (Hz)    
+        fmax: float
+            Upper Frequency of Interest (Hz)   
+        n_surrogates: int
+            Number of surrogates used in the case of surrogate analysis
+        verbose: Boolean
+            Verbose mode for logging information during runtime
+        p_value: float
+            P-value used in surrogate testing
+    '''
 
     def __init__(self, window_size, step_size, fmin, fmax, n_surrogates=20, verbose=False, p_value=0.05):
         super().__init__(window_size, step_size, fmin, fmax,
@@ -203,6 +269,26 @@ class WPLI(BasePLI):
 
 
 class DPLI(BasePLI):
+    '''
+        dPLI Implementation
+
+        Attributes
+        ----------
+        window_size: float
+            length of each window in seconds
+        step_size : int
+            The increment in which windows are shifted.
+        fmin: float
+            Lower Frequency of Interest (Hz)    
+        fmax: float
+            Upper Frequency of Interest (Hz)   
+        n_surrogates: int
+            Number of surrogates used in the case of surrogate analysis
+        verbose: Boolean
+            Verbose mode for logging information during runtime
+        p_value: float
+            P-value used in surrogate testing
+    '''
 
     def __init__(self, window_size, step_size, fmin, fmax, n_surrogates=20, verbose=False, p_value=0.05):
         super().__init__(window_size, step_size, fmin, fmax,
@@ -258,7 +344,23 @@ class DPLI(BasePLI):
 
 
 def connectivity_compute(data, window_size, step_size, fmin, fmax, fs, n_surrogates=0, verbose=True, mode="aec"):
+    '''
+    Generic Function used to compute AEC, DPLI, or WPLI on a given dataset
 
+    input:
+        data (numpy.ndarray (channels, time)): the data segment to calculate pairwise corrected aec on
+        window_size (float): length of each window in seconds
+        step_size (int): the increment in which windows are shifted.
+        fmin (float): Lower Frequency of interest (Hz)
+        fmax (float): Upper Frequency of interest (Hz)
+        fs (int): Sampling rate (Hz)
+        n_surrogates (int): number of surrogates used in surrogate analysis
+        verbose: Verbose mode for logging information during runtime
+        mode: 'aec', 'wpli', or 'dpli' 
+
+    output:
+        computed metric (aec, wpli, or dpli)
+    '''
     metrics = {
         "wpli": WPLI,
         "dpli": DPLI,
