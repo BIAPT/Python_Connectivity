@@ -5,155 +5,110 @@ from scipy.stats import pearsonr, wilcoxon
 
 class ConnectivityMeasure:
     '''
-        Parent class for both PLI and AEC connectivity measures.
+    Parent class for both PLI and AEC connectivity measures.
 
-
-        Parameters
-        ----------
-        window_size: float
-            Length of each window in seconds.
-        step_size : int
-            The increment in which windows are shifted.
-        fmin: float
-            Lower frequency of interest (Hz).
-        fmax: float
-            Upper frequency of interest (Hz).
-        verbose: bool, optional
-            Verbose mode for logging information during runtime. Default: False
+    Parameters
+    ----------
+    verbose: bool, optional
+        Verbose mode for logging information during runtime. Default: False
     '''
 
-    def __init__(self, window_size, step_size, fmin, fmax, verbose=False):
-        self.window_size = window_size
-        self.step_size = step_size
-        self.fmin = fmin
-        self.fmax = fmax
+    def __init__(self, verbose=False):
         self.verbose = verbose
 
-    def _window_data(self, data, fs):
-        windows = []
-        for ix in range(0, data.shape[1] - (self.window_size * fs) + 1, self.step_size * fs):
-            windows.append(data[:, ix:ix + (self.window_size * fs)])
-        windows = np.array(windows)
-        return windows
-
-    def _filter_data(self, data, fs):
-        b, a = butter(1, [self.fmin / (fs / 2), self.fmax / (fs / 2)],
-                      btype='bandpass', analog=False, output='ba', fs=None)
-        data_filt = filtfilt(b, a, data, padlen=3 * (max(len(a), len(b) - 1)))
-        return data_filt
-
-    def compute(self, data, fs):
+    def compute(self, data):
         '''
-        Used to connectivity within each window in child classes. Here, used
-        to filter data and split into windows.
-
+        Used to compute connectivity within each window in child classes.
 
         Parameters
         ----------
-        data: ndarray
-            Continuous data of shape (number of channels, number of time points).
-        fs: float
-            Sampling rate (Hz).
+        data: ndarray of shape (windows, channels, time)
+            Windowed data.
 
         Returns
         -------
-        windows: ndarray
-            Windowed data of shape (number of windows, number of channels, 
-            length of windows).
+        conn: ndarray of shape (windows, channels, channels)
+            Connectivity data.
         '''
-        data_filt = self._filter_data(data, fs)
-        windows = self._window_data(data_filt, fs)
-        return windows
+        raise NotImplementedError()
 
 
 class AEC(ConnectivityMeasure):
     '''
     AEC implementation.
 
-
     Parameters
     ----------
-    window_size: float
-        Length of each window in seconds.
-    step_size : int
-        The increment in which windows are shifted.
-    fmin: float
-        Lower frequency of interest (Hz).
-    fmax: float
-        Upper frequency of interest (Hz).
     verbose: bool, optional
         Verbose mode for logging information during runtime. Default: False
     '''
 
-    def __init__(self, window_size, step_size, fmin, fmax, verbose=False):
-        super().__init__(window_size, step_size, fmin, fmax, verbose=verbose)
+    def __init__(self, verbose=False):
+        super().__init__(verbose=verbose)
 
-    def compute(self, data, fs):
+    def compute(self, data):
         '''
         Compute AEC within each window.
 
         Parameters
         ----------
-        data: ndarray
-            Continuous data of shape (number of channels, number of time points).
-        fs: float
-            Sampling rate (Hz).
+        data: ndarray of shape (windows, channels, time)
+            Windowed data.
 
         Returns
         -------
-        aec: ndarray
-            AEC connectivity matrix of shape (number of windows, number of channels, 
-            number of channels).
+        aec: ndarray of shape (windows, channels, channels)
+            AEC connectivity matrix.
         '''
-
-        windows = super().compute(data, fs)
-        aec = self._aec_windows(windows)
+        aec = self._aec_windows(data)
         return aec
 
-    def _aec_windows(self, windows):
-        # initialize AEC
-        aec = np.zeros((windows.shape[1], windows.shape[1], windows.shape[0]))
-        # iterate over the windows
-        for index, window in enumerate(windows):
+    def _aec_windows(self, data):
+        # Initialize AEC
+        aec = np.zeros((data.shape[1], data.shape[1], data.shape[0]))
+        # Iterate over the windows
+        for index, window in enumerate(data):
             if self.verbose:
-                print(f"Computing on window {index+1}/{len(windows)}")
-            aec[:, :, index] = self._aec_pairwise_corrected(
-                window, windows.shape[1], 0)
+                print(f"Computing on window {index+1}/{len(data)}")
+            aec[:, :, index] = self._aec_pairwise_corrected(window)
             index += 1
-        return np.transpose(((aec + np.transpose(aec, (1, 0, 2))) / 2), [2, 0, 1])
+        return np.transpose(((aec + np.transpose(aec, (1, 0, 2))) / 2),
+                            [2, 0, 1])
 
-    def _aec_pairwise_corrected(self, data, num_channels, cut_amount):
-        # transpose the data
+    def _aec_pairwise_corrected(self, data):
+
+        # Transpose the data
         data = data.T
 
-        # initialize the aec
+        # Initialize the AEC
+        num_channels = data.shape[1]
         aec = np.zeros((num_channels, num_channels))
 
         # Pairwise leakage correction in window for AEC
         # Loops around all possible ROI pairs
         for region_i in range(num_channels):
 
-            # select the first channel of interest
+            # Select the first channel of interest
             y = data[:, region_i]
             y = y.reshape((len(y), 1))
 
             for region_j in range(num_channels):
 
-                # ignore correlation with itself
+                # Ignore correlation with itself
                 if region_i == region_j:
                     continue
 
-                # select the second channel of interest
+                # Select the second channel of interest
                 x = data[:, region_j]
                 x = x.reshape((len(x), 1))
 
                 # Leakage Reduction
-                beta_leak = np.linalg.pinv(y)@x
-                xc = x - y@beta_leak
+                beta_leak = np.linalg.pinv(y) @ x
+                xc = x - y @ beta_leak
 
-                # hilbert
+                # Hilbert transform
                 ht = hilbert(np.concatenate([xc, y], axis=1), axis=0)
-                ht = ht[cut_amount:ht.shape[0] - cut_amount, :]
+                ht = ht[:ht.shape[0], :]
                 ht -= np.mean(ht, axis=0)
 
                 env = np.abs(ht)
@@ -167,17 +122,8 @@ class BasePLI(ConnectivityMeasure):
     '''
     Parent class for both wPLI and dPLI connectivity measures.
 
-
     Parameters
     ----------
-    window_size: float
-        Length of each window in seconds.
-    step_size : int
-        The increment in which windows are shifted.
-    fmin: float
-        Lower frequency of interest (Hz).
-    fmax: float
-        Upper frequency of interest (Hz).
     n_surrogates: int, optional
         Number of surrogates used in the case of surrogate analysis.
         Default: 20
@@ -185,32 +131,28 @@ class BasePLI(ConnectivityMeasure):
         Verbose mode for logging information during runtime. Default: False
     '''
 
-    def __init__(self, window_size, step_size, fmin, fmax, n_surrogates=20, verbose=False):
-        super().__init__(window_size, step_size, fmin, fmax, verbose=verbose)
+    def __init__(self, n_surrogates=20, verbose=False):
+        super().__init__(verbose=verbose)
         self.n_surrogates = n_surrogates
 
-    def compute(self, data, fs):
+    def compute(self, data):
         '''
         Compute PLI within each window.
 
         Parameters
         ----------
-        data: ndarray
-            Continuous data of shape (number of channels, number of time points).
-        fs: float
-            Sampling rate (Hz).
+        data: ndarray of shape (windows, channels, time)
+            Windowed data.
 
         Returns
         -------
-        pli: ndarray
-            PLI connectivity matrix of shape (number of windows, number of channels, 
-            number of channels).
+        pli: ndarray of shape (windows, channels, channels)
+            PLI connectivity matrix.
         '''
-        windows = super().compute(data, fs)
         pli_windows = []
-        for n, window in enumerate(windows):
+        for n, window in enumerate(data):
             if self.verbose:
-                print(f"Computing on window {n+1}/{len(windows)}")
+                print(f"Computing on window {n+1}/{len(data)}")
             pli_window = self._pli_window(window, self._pli)
             if self.n_surrogates > 0:
                 pli_window = self._correct_pli_window(window, pli_window)
@@ -266,14 +208,6 @@ class WPLI(BasePLI):
 
     Parameters
     ----------
-    window_size: float
-        Length of each window in seconds.
-    step_size : int
-        The increment in which windows are shifted.
-    fmin: float
-        Lower frequency of interest (Hz).
-    fmax: float
-        Upper frequency of interest (Hz).
     n_surrogates: int, optional
         Number of surrogates used in the case of surrogate analysis.
         Default: 20
@@ -283,30 +217,26 @@ class WPLI(BasePLI):
         P-value used in surrogate testing. Default: 0.05
     '''
 
-    def __init__(self, window_size, step_size, fmin, fmax, n_surrogates=20, verbose=False, p_value=0.05):
-        super().__init__(window_size, step_size, fmin, fmax,
-                         n_surrogates=n_surrogates, verbose=verbose)
+    def __init__(self, n_surrogates=20, verbose=False, p_value=0.05):
+        super().__init__(n_surrogates=n_surrogates, verbose=verbose)
         self.p_value = p_value
 
-    def compute(self, data, fs):
+    def compute(self, data):
         '''
         Compute wPLI within each window.
 
         Parameters
         ----------
-        data: ndarray
-            Continuous data of shape (number of channels, number of time points).
-        fs: float
-            Sampling rate (Hz).
+        data: ndarray of shape (windows, channels, time)
+            Windowed data.
 
         Returns
         -------
-        wpli: ndarray
-            wPLI connectivity matrix of shape (number of windows, number of channels, 
-            number of channels).
+        wpli: ndarray of shape (windows, channels, channels)
+            wPLI connectivity matrix.
         '''
 
-        wpli = super().compute(data, fs)
+        wpli = super().compute(data)
         # Fill up the upper half triangle
         wpli = wpli + wpli.transpose([0, 2, 1])
 
@@ -344,14 +274,6 @@ class DPLI(BasePLI):
 
     Parameters
     ----------
-    window_size: float
-        Length of each window in seconds.
-    step_size : int
-        The increment in which windows are shifted.
-    fmin: float
-        Lower frequency of interest (Hz).
-    fmax: float
-        Upper frequency of interest (Hz).
     n_surrogates: int, optional
         Number of surrogates used in the case of surrogate analysis.
         Default: 20
@@ -361,35 +283,32 @@ class DPLI(BasePLI):
         P-value used in surrogate testing. Default: 0.05
     '''
 
-    def __init__(self, window_size, step_size, fmin, fmax, n_surrogates=20, verbose=False, p_value=0.05):
-        super().__init__(window_size, step_size, fmin, fmax,
-                         n_surrogates=n_surrogates, verbose=verbose)
+    def __init__(self, n_surrogates=20, verbose=False, p_value=0.05):
+        super().__init__(n_surrogates=n_surrogates, verbose=verbose)
         self.p_value = p_value
 
-    def compute(self, data, fs):
+    def compute(self, data):
         '''
         Compute dPLI within each window.
 
         Parameters
         ----------
-        data: ndarray
-            Continuous data of shape (number of channels, number of time points).
-        fs: float
-            Sampling rate (Hz).
+        data: ndarray of shape (windows, channels, time)
+            Windowed data.
 
         Returns
         -------
-        dpli: ndarray
-            dPLI connectivity matrix of shape (number of windows, number of channels, 
-            number of channels).
+        dpli: ndarray of shape (windows, channels, channels)
+            dPLI connectivity matrix.
         '''
-        dpli_init = super().compute(data, fs)
+        dpli_init = super().compute(data)
+        n_channels = dpli_init.shape[1]
 
-        # fill up the upper half triangle
+        # Fill up the upper half triangle
         dpli = dpli_init - np.transpose(dpli_init, [0, 2, 1])
-        i = np.triu_indices(dpli_init.shape[1], k=1)
-        j = np.diag_indices(dpli_init.shape[1])
-        z = np.zeros((1, dpli_init.shape[1], dpli_init.shape[1]))
+        i = np.triu_indices(n_channels, k=1)
+        j = np.diag_indices(n_channels)
+        z = np.zeros((1, n_channels, n_channels))
         z[0, i[0], i[1]] = 1
         dpli += z
         dpli[:, j[0], j[1]] = 0.5
@@ -430,26 +349,90 @@ class DPLI(BasePLI):
             return 0.5
 
 
-def connectivity_compute(data, window_size, step_size, fmin, fmax, fs, n_surrogates=0, verbose=True, mode="aec"):
+def window_data(data, window_size, step_size, fs):
+    '''
+    Split continuous data into windows.
+
+    Parameters
+    ----------
+    data: ndarray of shape (channels, time)
+        Continous data to be windowed.
+    window_size: float
+        Length of each window in seconds.
+    step_size : float
+        The increment in seconds by which windows are shifted.
+    fs: float
+        Sampling rate (Hz).
+
+    Returns
+    -------
+    windows: ndarray of shape (windows, channels, time)
+        Windowed data.
+
+    '''
+    windows = []
+    for ix in range(0, data.shape[1] - (window_size * fs) + 1,
+                    step_size * fs):
+        windows.append(data[:, ix:ix + (window_size * fs)])
+    windows = np.array(windows)
+    return windows
+
+
+def filter_data(data, fmin, fmax, fs):
+    '''
+    Bandpass filter continous data.
+
+    Parameters
+    ----------
+    data: ndarray of shape (channels, time)
+        Continous data to be filtered.
+    fmin: float
+        Lower frequency of interest (Hz).
+    fmax: float
+        Upper frequency of interest (Hz).
+    fs: float
+        Sampling rate (Hz).
+
+    Returns
+    -------
+    data_filt: ndarray of shape (channels, time)
+        Filtered data.
+
+    '''
+    b, a = butter(1, [fmin, fmax], btype='bandpass', analog=False,
+                  output='ba', fs=fs)
+    data_filt = filtfilt(b, a, data, padlen=3 * (max(len(a), len(b) - 1)))
+    return data_filt
+
+
+def connectivity_compute(data, window_size=None, step_size=None, fmin=None,
+                         fmax=None, fs=None, n_surrogates=0, verbose=True,
+                         mode="aec"):
     '''
     Generic Function used to compute AEC, dPLI, or wPLI.
 
     Parameters
     ----------
-        data: ndarray (channels, time)
+        data: ndarray of shape (channels, time) or (windows, channels, time)
             The data segment to calculate connectivity with.
-        window_size: float: 
-            Length of each window in seconds.
-        step_size: int:
-            The increment in which windows are shifted.
-        fmin: float
-            Lower frequency of interest (Hz).
-        fmax: float
-            Upper frequency of interest (Hz)
-        fs: int
-            Sampling rate (Hz).
+        window_size: float, optional
+            Length of each window in seconds. Unused if data already processed.
+            Default: None
+        step_size: float, optional
+            The increment by which windows are shifted. Unused if data already
+            processed. Default: None
+        fmin: float, optional
+            Lower frequency of interest (Hz). Unused if data already processed.
+            Default: None
+        fmax: float, optional
+            Upper frequency of interest (Hz). Unused if data already processed.
+            Default: None
+        fs: float, optional
+            Sampling rate (Hz). Unused if data already processed.
+            Default: None
         n_surrogates: int, optional
-            Number of surrogates used in surrogate analysis. Default: 0
+            Number of surrogates used in surrogate analysis. Only applies to
+            dPLI or wPLI methods. Default: 0
         verbose: bool, optional
             Verbose mode for logging information during runtime. Default: False
         mode: str, optional
@@ -457,9 +440,19 @@ def connectivity_compute(data, window_size, step_size, fmin, fmax, fs, n_surroga
 
     Returns
     -------
-        metric: ndarray (windows, channels, channels)
+        metric: ndarray of shape (windows, channels, channels)
             Metric (AEC, wPLI, or dPLI)
     '''
+
+    if data.ndim == 2:  # data is continuous and must be filtered/windowed
+        data_filt = filter_data(data, fmin, fmax, fs)
+        windows = window_data(data_filt, window_size, step_size, fs)
+    elif data.ndim == 3:  # data is already processed
+        windows = data
+    else:
+        raise ValueError(
+            "Data must be 2D (channels, time) or 3D (windows, channels, time)")
+
     metrics = {
         "wpli": WPLI,
         "dpli": DPLI,
@@ -468,13 +461,12 @@ def connectivity_compute(data, window_size, step_size, fmin, fmax, fs, n_surroga
 
     metric_class = metrics[mode]
     if metric_class == AEC:
-        assert n_surrogates == 0, "surrogate correction is not supported for the AEC"
-        metric_computer = metric_class(
-            window_size=window_size, step_size=step_size, fmin=fmin, fmax=fmax, verbose=verbose)
+        assert n_surrogates == 0, "Surrogate correction not supported for AEC."
+        metric_computer = metric_class(verbose=verbose)
     else:
-        metric_computer = metric_class(window_size=window_size, step_size=step_size,
-                                       fmin=fmin, fmax=fmax, n_surrogates=n_surrogates, verbose=verbose)
+        metric_computer = metric_class(
+            n_surrogates=n_surrogates, verbose=verbose)
 
-    metric = metric_computer.compute(data, fs)
+    metric = metric_computer.compute(windows)
 
     return metric
